@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>حبيبة — اختبار</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/styles.css">
+    <style>
+        html {
+            direction: rtl
+        }
+    </style>
+</head>
+
+<body class="bg-gradient-to-br from-pink-50 to-indigo-50 min-h-screen flex items-center justify-center">
+    <div class="max-w-3xl w-full p-6">
+        <header class="mb-6 text-center">
+            <h1 class="text-4xl font-extrabold text-pink-600">حبيبة</h1>
+            <p class="text-sm text-gray-600">اختبار ممتع وبسيط لكِ</p>
+        </header>
+
+        <main id="quiz" class="bg-white shadow-xl rounded-xl p-6">
+            <div class="flex items-center justify-between mb-4">
+                <div class="w-3/4">
+                    <div id="progress-text" class="text-sm text-gray-600">السؤال 1</div>
+                    <div class="w-full bg-gray-200 rounded-full h-2 mt-2">
+                        <div id="progress-bar" class="bg-pink-400 h-2 rounded-full" style="width:0%"></div>
+                    </div>
+                </div>
+                <div class="text-left">
+                    <div id="score" class="text-sm text-gray-600">النتيجة: 0</div>
+                </div>
+            </div>
+
+            <section id="card" class="text-right">
+                <h2 id="question-text" class="text-2xl font-semibold text-gray-800 mb-4">جارٍ التحميل...</h2>
+
+                <div id="options" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <!-- خيارات تُحقَن هنا -->
+                </div>
+
+                <div id="feedback" class="mt-4 h-12 text-right"></div>
+            </section>
+
+            <section id="result" class="hidden text-center p-6">
+                <h2 id="final-message" class="text-3xl font-bold text-pink-600">تهانينا!</h2>
+                <p id="final-score" class="mt-2 text-gray-700"></p>
+                <button id="restart" class="mt-4 px-4 py-2 bg-pink-600 text-white rounded-lg">إعادة المحاولة</button>
+            </section>
+        </main>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+
+</html>
