@@ -35,9 +35,13 @@
             </section>
 
             <section id="editor" class="hidden mt-4">
-                <label class="block text-sm text-gray-700 mb-1">ألصق مصفوفة JSON من الأسئلة (أقصى 50):</label>
+                <label class="block text-sm text-gray-700 mb-1">ألصق مصفوفة JSON أو الصيغة النصية متعددة الأسئلة (أقصى
+                    50):</label>
                 <textarea id="questions-json" class="w-full h-64 p-3 border rounded mb-3 shadow-sm"
-                    placeholder='[ {"question":"...","options":["..."],"answer":"..."} ]'></textarea>
+                    placeholder='مثال JSON: [ {"question":"اكتب...","options":["أ","ب"],"answer":"أ"} ]\nأو ألصق الصيغة النصية المتعددة (اسحب/ألصق عدة أسئلة مفصولة بسطر فارغ)'></textarea>
+                <div class="text-xs text-gray-500 mb-2">مثال سؤال JSON (يمكن لصق مصفوفة
+                    كاملة):<br><code>{ "question": "اكتب المصطلح العلمي للدلالة على تغير موضع الجسم بمرور الزمن.", "options": ["المسافة", "الإزاحة", "السرعة", "التسارع"], "answer": "الإزاحة" }</code>
+                </div>
                 <div class="flex items-center justify-between">
                     <div><span id="preview-count" class="text-sm text-gray-600">عدد الأسئلة: 0</span></div>
                     <div>
@@ -89,14 +93,19 @@
 
         $('#questions-json').addEventListener('input', () => {
             const txt = $('#questions-json').value.trim();
+            $('#save-msg').textContent = '';
+            $('#save-msg').classList.remove('text-red-600', 'text-green-600', 'text-yellow-600');
             if (!txt) { $('#preview-count').textContent = 'عدد الأسئلة: 0'; return; }
             try {
                 const parsed = JSON.parse(txt);
                 $('#preview-count').textContent = `عدد الأسئلة: ${Array.isArray(parsed) ? parsed.length : 0}`;
-                $('#save-msg').textContent = '';
             } catch (e) {
-                $('#preview-count').textContent = 'عدد الأسئلة: 0';
-                $('#save-msg').textContent = 'JSON غير صالح';
+                // not JSON; show bulk/text mode hint
+                // quick heuristic: count blocks separated by blank line
+                const blocks = txt.split(/\n\s*\n/).filter(b => b.trim());
+                $('#preview-count').textContent = `كشف الصيغة النصية: ${blocks.length} سؤالًا تقريبًا`;
+                $('#save-msg').textContent = 'النص ليس JSON: عند الحفظ سيُحاول الخادم تحليل صيغة الأسئلة المتعددة.';
+                $('#save-msg').classList.add('text-yellow-600');
             }
         });
 
@@ -104,23 +113,60 @@
             const pwd = $('#pwd').value;
             const txt = $('#questions-json').value.trim();
             $('#save-msg').textContent = '';
-            let parsed;
+            $('#save-msg').classList.remove('text-red-600', 'text-green-600', 'text-yellow-600');
+
+            // Try parse as JSON array first
+            let isJson = false;
+            let parsed = null;
             try {
                 parsed = JSON.parse(txt);
-                validateQuestions(parsed);
-            } catch (e) { $('#save-msg').textContent = e.message; return; }
+                isJson = true;
+            } catch (e) {
+                isJson = false;
+            }
+
+            if (isJson) {
+                try {
+                    validateQuestions(parsed);
+                } catch (e) { $('#save-msg').textContent = e.message; $('#save-msg').classList.add('text-red-600'); return; }
+            }
+
             try {
-                const res = await fetch(API_UPDATE, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: pwd, questions: parsed }) });
-                if (res.ok) {
-                    const data = await res.json();
-                    $('#save-msg').textContent = `تم الحفظ — تم تحديث ${data.count} سؤالًا.`;
-                } else if (res.status === 403) {
-                    $('#save-msg').textContent = 'كلمة المرور غير صحيحة.';
+                let body;
+                if (isJson) {
+                    body = JSON.stringify({ password: pwd, questions: parsed });
                 } else {
-                    const d = await res.json().catch(() => ({}));
-                    $('#save-msg').textContent = d.error || 'خطأ أثناء الحفظ.';
+                    // send raw text and let server parse it (bulk format)
+                    if (!txt) { $('#save-msg').textContent = 'لا يوجد نص للحفظ.'; $('#save-msg').classList.add('text-red-600'); return; }
+                    body = JSON.stringify({ password: pwd, questions_raw: txt });
                 }
-            } catch (e) { $('#save-msg').textContent = 'خطأ في الاتصال.'; }
+                const res = await fetch(API_UPDATE, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+                const d = await res.json().catch(() => ({}));
+                if (res.ok) {
+                    $('#save-msg').textContent = `🎉 تم الحفظ — تمت معالجة ${d.count} سؤالًا.`;
+                    $('#save-msg').classList.add('text-green-600');
+                    // a little motivational message
+                    const msg = document.createElement('div');
+                    msg.className = 'mt-2 text-sm text-gray-700';
+                    msg.textContent = 'عمل رائع — شكرًا لمساهمتك في إثراء محتوى الاختبارات!';
+                    const parent = $('#save-msg').parentNode;
+                    // remove old motivational messages
+                    const old = parent.querySelector('.motivational');
+                    if (old) old.remove();
+                    msg.classList.add('motivational');
+                    parent.appendChild(msg);
+                } else if (res.status === 403) {
+                    $('#save-msg').textContent = 'كلمة المرور غير صحيحة.'; $('#save-msg').classList.add('text-red-600');
+                } else {
+                    $('#save-msg').textContent = d.error || 'خطأ أثناء الحفظ.'; $('#save-msg').classList.add('text-red-600');
+                    if (d.warning === 'backup_failed') {
+                        const w = document.createElement('div');
+                        w.className = 'text-xs text-yellow-600 mt-1';
+                        w.textContent = 'تم الحفظ لكن فشل إنشاء النسخة الاحتياطية على الخادم.';
+                        $('#save-msg').parentNode.appendChild(w);
+                    }
+                }
+            } catch (e) { $('#save-msg').textContent = 'خطأ في الاتصال.'; $('#save-msg').classList.add('text-red-600'); }
         });
 
         document.getElementById('logout').addEventListener('click', () => {
