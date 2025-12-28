@@ -1,6 +1,9 @@
 const API = {
     questions: '/questions',
-    check: '/check'
+    meta: '/questions_meta',
+    check: '/check',
+    adminVerify: '/admin/verify',
+    adminUpdate: '/admin/update_questions'
 };
 
 let questions = [];
@@ -32,8 +35,9 @@ function renderQuestion() {
     opts.innerHTML = '';
     q.options.forEach((opt) => {
         const btn = document.createElement('button');
-        btn.className = 'option bg-gray-100 hover:bg-gray-200 p-3 rounded-lg shadow-sm text-right';
-        btn.textContent = opt;
+        btn.className = 'option bg-gray-100 hover:bg-gray-200 p-3 rounded-lg shadow-sm text-right transition';
+        // label + icon right side
+        btn.innerHTML = `<span class="label">${opt}</span><span class="icon" aria-hidden="true">•</span>`;
         btn.onclick = () => handleAnswer(opt, btn);
         opts.appendChild(btn);
     });
@@ -53,17 +57,18 @@ async function handleAnswer(selected, btn) {
     });
     const data = await res.json();
     if (data.correct) {
-        btn.classList.remove('bg-gray-100');
-        btn.classList.add('bg-green-200');
+        btn.classList.add('correct');
+        btn.classList.remove('wrong');
+        btn.querySelector('.icon').textContent = '✓';
         $('#feedback').innerHTML = `<div class="text-green-700 font-semibold">صح! ${randomCongrats()}</div>`;
         score += 1;
     } else {
-        btn.classList.remove('bg-gray-100');
-        btn.classList.add('bg-red-200');
+        btn.classList.add('wrong');
+        btn.querySelector('.icon').textContent = '✕';
         $('#feedback').innerHTML = `<div class="text-red-700 font-semibold">غلط — الإجابة الصحيحة: ${data.answer}</div>`;
         // highlight correct option
         document.querySelectorAll('.option').forEach(b => {
-            if (b.textContent === data.answer) b.classList.add('bg-green-200');
+            if (b.querySelector('.label') && b.querySelector('.label').textContent === data.answer) b.classList.add('correct');
         });
     }
     setProgress();
@@ -84,9 +89,64 @@ function showResult() {
     $('#card').classList.add('hidden');
     const res = $('#result');
     res.classList.remove('hidden');
-    $('#final-message').textContent = `تهانينا، حبيبة!`;
+    const msgs = ['عمل رائع! استمري 🎉', 'أداء ممتاز — أحسنتِ!', 'ممتاز! فخورون بكِ!'];
+    $('#final-message').textContent = msgs[Math.floor(Math.random() * msgs.length)];
+    $('#final-message').classList.add('final-anim');
     $('#final-score').textContent = `أحرزت ${score} من أصل ${questions.length}.`;
+    // small confetti (emoji) burst
+    const conf = document.createElement('div');
+    conf.className = 'confetti';
+    conf.style.right = '20px';
+    conf.style.top = '10px';
+    conf.style.fontSize = '20px';
+    conf.textContent = '🎉✨🌟';
+    res.appendChild(conf);
+    setTimeout(() => conf.remove(), 2400);
     $('#restart').onclick = () => { index = 0; score = 0; $('#card').classList.remove('hidden'); res.classList.add('hidden'); renderQuestion(); };
 }
 
-document.addEventListener('DOMContentLoaded', load);
+let currentMeta = 0;
+
+async function fetchMeta() {
+    try {
+        const res = await fetch(API.meta);
+        if (!res.ok) return null;
+        const data = await res.json();
+        return Number(data.mtime) || 0;
+    } catch (e) { return null; }
+}
+
+function showUpdateToast(msg) {
+    const f = document.getElementById('feedback');
+    if (!f) return;
+    const prev = f.querySelector('.update-toast');
+    if (prev) prev.remove();
+    const d = document.createElement('div');
+    d.className = 'update-toast text-sm text-green-700 font-semibold';
+    d.textContent = msg;
+    f.prepend(d);
+    setTimeout(() => { d.remove(); }, 3000);
+}
+
+function startMetaPolling(interval = 5000) {
+    // fetch initial meta
+    fetchMeta().then(m => { if (m) currentMeta = m; });
+    setInterval(async () => {
+        const m = await fetchMeta();
+        if (m && currentMeta && m !== currentMeta) {
+            currentMeta = m;
+            // reload questions and reset progress
+            index = 0; score = 0;
+            await load();
+            showUpdateToast('تم تحديث الأسئلة تلقائيًا.');
+        } else if (m) {
+            currentMeta = m;
+        }
+    }, interval);
+}
+
+// hook up on DOM ready
+document.addEventListener('DOMContentLoaded', () => {
+    load();
+    startMetaPolling();
+});

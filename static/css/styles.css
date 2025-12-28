@@ -1,14 +1,139 @@
 /* small custom styles for حبيبة */
 body {
-    font-family: Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
+    font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, "Noto Naskh Arabic", 'Segoe UI Emoji';
     direction: rtl;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+/* Card & page polish */
+#quiz {
+    border-radius: 16px;
+    padding: 28px;
+}
+
+header h1 {
+    letter-spacing: .5px;
 }
 
 .option {
-    transition: transform .12s ease, box-shadow .12s ease;
+    transition: transform .14s cubic-bezier(.2, .9, .3, 1), box-shadow .14s ease, background-color .14s ease;
+    text-align: right;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 14px;
+    border-radius: 12px;
+    box-shadow: 0 4px 8px rgba(16, 24, 40, 0.04);
+    cursor: pointer;
+    user-select: none;
+}
+
+.option:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 10px 20px rgba(16, 24, 40, 0.06);
+}
+
+.option[disabled] {
+    opacity: 0.9;
+    cursor: default;
+}
+
+.option .label {
+    flex: 1;
     text-align: right;
 }
 
-.option:active {
-    transform: translateY(3px);
+.option .icon {
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+}
+
+.option.correct {
+    background: linear-gradient(90deg, #bbf7d0, #86efac);
+    color: #064e3b;
+}
+
+.option.wrong {
+    background: linear-gradient(90deg, #fecaca, #fda4af);
+    color: #9f1239;
+}
+
+/* feedback area */
+#feedback {
+    min-height: 38px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+}
+
+.update-toast {
+    padding: 6px 10px;
+    border-radius: 8px;
+    background: rgba(34, 197, 94, 0.12);
+    color: #059669;
+}
+
+/* result animation */
+.final-anim {
+    animation: pop 700ms ease both;
+}
+
+@keyframes pop {
+    0% {
+        transform: scale(.96);
+        opacity: 0
+    }
+
+    60% {
+        transform: scale(1.04);
+        opacity: 1
+    }
+
+    100% {
+        transform: scale(1);
+    }
+}
+
+/* small confetti/emojis */
+.confetti {
+    position: absolute;
+    pointer-events: none;
+}
+
+/* admin page tweaks */
+#questions-json {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, 'Roboto Mono', 'Courier New', monospace;
+    font-size: 14px;
+    line-height: 1.45
+}
+
+#save-msg {
+    min-height: 1.1rem;
+}
+
+/* buttons */
+button {
+    transition: transform .12s ease, box-shadow .12s ease
+}
+
+button:active {
+    transform: translateY(1px);
+}
+
+/* subtle small-screen adjustments */
+@media (max-width:640px) {
+    .option {
+        padding: 12px;
+    }
+
+    #quiz {
+        padding: 20px;
+    }
 }

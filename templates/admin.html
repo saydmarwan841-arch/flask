@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>لوحة المشرف — حبيبة</title>
+    <link href="/static/css/tailwind.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/styles.css">
+    <style>
+        html {
+            direction: rtl
+        }
+    </style>
+</head>
+
+<body class="bg-gradient-to-br from-pink-50 to-indigo-50 min-h-screen flex items-center justify-center">
+    <div class="max-w-3xl w-full p-6">
+        <header class="mb-6 text-center">
+            <h1 class="text-2xl font-extrabold text-pink-600">لوحة المشرف</h1>
+            <p class="text-sm text-gray-600">صفحة مخفية لتحديث الأسئلة (محمية بكلمة سر)</p>
+        </header>
+
+        <main class="bg-white shadow-xl rounded-xl p-6 text-right">
+            <section id="login">
+                <label class="block text-sm text-gray-700 mb-1">كلمة المرور:</label>
+                <input id="pwd" type="password" class="w-full p-2 border rounded mb-3" />
+                <div class="flex justify-between items-center">
+                    <div id="login-msg" class="text-sm text-red-600"></div>
+                    <div>
+                        <button id="verify" class="px-3 py-2 bg-pink-600 text-white rounded">تأكيد</button>
+                        <a href="/" class="px-3 py-2 ml-2 border rounded">عودة</a>
+                    </div>
+                </div>
+            </section>
+
+            <section id="editor" class="hidden mt-4">
+                <label class="block text-sm text-gray-700 mb-1">ألصق مصفوفة JSON من الأسئلة (أقصى 50):</label>
+                <textarea id="questions-json" class="w-full h-64 p-3 border rounded mb-3 shadow-sm"
+                    placeholder='[ {"question":"...","options":["..."],"answer":"..."} ]'></textarea>
+                <div class="flex items-center justify-between">
+                    <div><span id="preview-count" class="text-sm text-gray-600">عدد الأسئلة: 0</span></div>
+                    <div>
+                        <button id="save"
+                            class="px-3 py-2 bg-gradient-to-r from-green-500 to-emerald-400 text-white rounded shadow">حفظ</button>
+                        <button id="logout" class="px-3 py-2 ml-2 border rounded">خروج</button>
+                    </div>
+                </div>
+                <div id="save-msg" class="mt-3 text-sm"></div>
+            </section>
+        </main>
+    </div>
+
+    <script>
+        const API_VERIFY = '/admin/verify';
+        const API_UPDATE = '/admin/update_questions';
+
+        const $ = (s) => document.querySelector(s);
+
+        function validateQuestions(arr) {
+            if (!Array.isArray(arr)) throw new Error('المدخل يجب أن يكون مصفوفة JSON');
+            if (arr.length === 0) throw new Error('المصفوفة فارغة');
+            if (arr.length > 50) throw new Error('الحد الأقصى 50 سؤالًا');
+            arr.forEach((q, i) => {
+                if (typeof q.question !== 'string' || !q.question.trim()) throw new Error(`السؤال رقم ${i + 1} غير صالح`);
+                if (!Array.isArray(q.options) || q.options.length < 2) throw new Error(`السؤال رقم ${i + 1} يجب أن يحتوي على مصفوفة خيارات (2 على الأقل)`);
+                if (typeof q.answer !== 'string' || !q.answer.trim()) throw new Error(`السؤال رقم ${i + 1} يجب أن يحتوي على إجابة صحيحة كنص`);
+                if (!q.options.includes(q.answer)) throw new Error(`السؤال رقم ${i + 1} الإجابة الصحيحة يجب أن تكون من بين الخيارات`);
+            });
+            return true;
+        }
+
+        document.getElementById('verify').addEventListener('click', async () => {
+            const pwd = $('#pwd').value;
+            $('#login-msg').textContent = '';
+            try {
+                const res = await fetch(API_VERIFY, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: pwd }) });
+                if (res.ok) {
+                    // show editor
+                    $('#login').classList.add('hidden');
+                    $('#editor').classList.remove('hidden');
+                    $('#save-msg').textContent = '';
+                    $('#questions-json').focus();
+                } else {
+                    $('#login-msg').textContent = 'كلمة المرور غير صحيحة.';
+                }
+            } catch (e) { $('#login-msg').textContent = 'خطأ في الاتصال.'; }
+        });
+
+        $('#questions-json').addEventListener('input', () => {
+            const txt = $('#questions-json').value.trim();
+            if (!txt) { $('#preview-count').textContent = 'عدد الأسئلة: 0'; return; }
+            try {
+                const parsed = JSON.parse(txt);
+                $('#preview-count').textContent = `عدد الأسئلة: ${Array.isArray(parsed) ? parsed.length : 0}`;
+                $('#save-msg').textContent = '';
+            } catch (e) {
+                $('#preview-count').textContent = 'عدد الأسئلة: 0';
+                $('#save-msg').textContent = 'JSON غير صالح';
+            }
+        });
+
+        document.getElementById('save').addEventListener('click', async () => {
+            const pwd = $('#pwd').value;
+            const txt = $('#questions-json').value.trim();
+            $('#save-msg').textContent = '';
+            let parsed;
+            try {
+                parsed = JSON.parse(txt);
+                validateQuestions(parsed);
+            } catch (e) { $('#save-msg').textContent = e.message; return; }
+            try {
+                const res = await fetch(API_UPDATE, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: pwd, questions: parsed }) });
+                if (res.ok) {
+                    const data = await res.json();
+                    $('#save-msg').textContent = `تم الحفظ — تم تحديث ${data.count} سؤالًا.`;
+                } else if (res.status === 403) {
+                    $('#save-msg').textContent = 'كلمة المرور غير صحيحة.';
+                } else {
+                    const d = await res.json().catch(() => ({}));
+                    $('#save-msg').textContent = d.error || 'خطأ أثناء الحفظ.';
+                }
+            } catch (e) { $('#save-msg').textContent = 'خطأ في الاتصال.'; }
+        });
+
+        document.getElementById('logout').addEventListener('click', () => {
+            $('#editor').classList.add('hidden');
+            $('#login').classList.remove('hidden');
+            $('#pwd').value = '';
+            $('#questions-json').value = '';
+            $('#preview-count').textContent = 'عدد الأسئلة: 0';
+            $('#login-msg').textContent = '';
+            $('#save-msg').textContent = '';
+        });
+    </script>
+</body>
+
+</html>
