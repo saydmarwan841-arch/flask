@@ -18,6 +18,27 @@ async function load() {
     renderQuestion();
 }
 
+async function refreshQuestionsPreserveProgress() {
+    try {
+        const oldIndex = index;
+        const res = await fetch(API.questions);
+        const newQs = await res.json();
+        // preserve score and index as much as possible
+        questions = newQs;
+        if (questions.length === 0) {
+            index = 0;
+            score = 0;
+            renderQuestion();
+            showUpdateToast('تم تحديث الأسئلة: لا توجد أسئلة حالياً.');
+            return;
+        }
+        if (oldIndex >= questions.length) index = questions.length - 1;
+        // re-render current question without resetting score
+        renderQuestion();
+        showUpdateToast('تم تحديث الأسئلة تلقائيًا.');
+    } catch (e) { console.warn('refresh failed', e); }
+}
+
 function setProgress() {
     const pct = questions.length ? ((index) / questions.length) * 100 : 0;
     const bar = $('#progress-bar');
@@ -154,25 +175,33 @@ function showUpdateToast(msg) {
     setTimeout(() => { d.remove(); }, 3000);
 }
 
-function startMetaPolling(interval = 5000) {
-    // fetch initial meta
-    fetchMeta().then(m => { if (m !== null) currentMeta = m; });
-    setInterval(async () => {
-        const m = await fetchMeta();
-        if (m !== null && currentMeta !== null && m !== currentMeta) {
-            currentMeta = m;
-            // reload questions and reset progress
-            index = 0; score = 0;
-            await load();
-            showUpdateToast('تم تحديث الأسئلة تلقائيًا.');
-        } else if (m !== null) {
-            currentMeta = m;
+function startSSE() {
+    if (!window.EventSource) return;
+    let es = new EventSource('/events');
+    es.onmessage = (e) => {
+        try {
+            const data = JSON.parse(e.data);
+            if (data && data.event === 'questions_updated') {
+                // fetch new questions but preserve user's progress
+                refreshQuestionsPreserveProgress();
+            }
+        } catch (err) {
+            // ignore non-json or comment
         }
-    }, interval);
+    };
+    es.onerror = () => {
+        // reconnect after a delay
+        es.close();
+        setTimeout(startSSE, 2000);
+    };
 }
+
+// replaced polling with SSE
+// function startMetaPolling(interval = 5000) { ... }
+
 
 // hook up on DOM ready
 document.addEventListener('DOMContentLoaded', () => {
     load();
-    startMetaPolling();
+    startSSE();
 });

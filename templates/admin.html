@@ -14,7 +14,8 @@
     </style>
 </head>
 
-<body class="bg-gradient-to-br from-pink-50 to-indigo-50 min-h-screen flex items-center justify-center">
+<body class="bg-gradient-to-br from-pink-50 to-indigo-50 min-h-screen flex items-center justify-center"
+    data-logged-in="{{ logged_in | tojson }}">
     <div class="max-w-3xl w-full p-6">
         <header class="mb-6 text-center">
             <h1 class="text-2xl font-extrabold text-pink-600">لوحة المشرف</h1>
@@ -44,7 +45,9 @@
                     كاملة):<br><code>{ "question": "اكتب المصطلح العلمي للدلالة على تغير موضع الجسم بمرور الزمن.", "options": ["المسافة", "الإزاحة", "السرعة", "التسارع"], "answer": "الإزاحة" }</code>
                 </div>
                 <div class="flex items-center justify-between">
-                    <div><span id="preview-count" class="text-sm text-gray-600">عدد الأسئلة: 0</span></div>
+                    <div><span id="preview-count" class="text-sm text-gray-600">عدد الأسئلة: 0</span>
+                        <div class="text-xs text-gray-500">التخزين: دائم (قاعدة بيانات)</div>
+                    </div>
                     <div>
                         <button id="save"
                             class="px-3 py-2 bg-gradient-to-r from-green-500 to-emerald-400 text-white rounded shadow">حفظ</button>
@@ -59,8 +62,8 @@
     <script>
         const API_VERIFY = '/admin/verify';
         const API_UPDATE = '/admin/update_questions';
-        // server-side known logged-in state
-        const LOGGED_IN = {{ 'true' if logged_in else 'false' }};
+        // server-side known logged-in state (read from body data-attribute to satisfy editor/linter)
+        const LOGGED_IN = document.body.dataset.loggedIn === 'true';
 
         const $ = (s) => document.querySelector(s);
 
@@ -141,6 +144,9 @@
                     validateQuestions(parsed);
                 } catch (e) { $('#save-msg').textContent = e.message; $('#save-msg').classList.add('text-red-600'); return; }
             }
+
+            // confirm replacement
+            if (!confirm('تأكيد: سيتم استبدال كل الأسئلة الحالية بالأسئلة الجديدة. هل تودين المتابعة؟')) return;
 
             try {
                 let body;

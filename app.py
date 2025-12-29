@@ -3,6 +3,8 @@ import json
 import os
 import shutil
 import time
+import sqlite3
+from contextlib import closing
 
 app = Flask(__name__, static_folder='static', template_folder='templates')
 # session for admin auth
@@ -12,20 +14,101 @@ app.secret_key = os.environ.get('SECRET_KEY', 'dev-secret-key')
 QUESTIONS_FILE = os.path.join(app.root_path, 'questions.json')
 BACKUP_FILE = os.path.join(app.root_path, 'questions_backup.json')
 
-# In-memory questions (no file writes). Pre-populate from existing file if present.
-QUESTIONS_IN_MEMORY = []
+# DB settings
+DB_PATH = os.path.join(app.root_path, 'data.sqlite3')
 QUESTIONS_MTIME = int(time.time())
 
-# Try to load initial data from questions.json (best-effort, no writes)
+# Database helpers
+def get_conn():
+    conn = sqlite3.connect(DB_PATH, timeout=5)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def init_db():
+    """Create tables if missing and pre-populate from questions.json if DB is empty."""
+    with closing(get_conn()) as conn:
+        cur = conn.cursor()
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS questions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ord INTEGER NOT NULL,
+                question TEXT NOT NULL,
+                options TEXT NOT NULL,
+                answer TEXT NOT NULL,
+                updated_at INTEGER NOT NULL
+            )
+        ''')
+        conn.commit()
+        # if empty, try load from questions.json (best-effort)
+        cur.execute('SELECT COUNT(1) as c FROM questions')
+        row = cur.fetchone()
+        if row and row['c'] == 0 and os.path.exists(QUESTIONS_FILE):
+            try:
+                with open(QUESTIONS_FILE, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                if isinstance(data, list) and data:
+                    ts = int(time.time())
+                    for i, q in enumerate(data):
+                        cur.execute('INSERT INTO questions (ord, question, options, answer, updated_at) VALUES (?,?,?,?,?)',
+                                    (i, q.get('question',''), json.dumps(q.get('options',[]), ensure_ascii=False), q.get('answer',''), ts))
+                    conn.commit()
+            except Exception:
+                app.logger.exception('Failed seeding DB from questions.json')
+
+
+def fetch_all_questions():
+    """Return list of question dicts ordered by ord."""
+    try:
+        with closing(get_conn()) as conn:
+            cur = conn.cursor()
+            cur.execute('SELECT ord, question, options, answer FROM questions ORDER BY ord')
+            out = []
+            for r in cur.fetchall():
+                opts = json.loads(r['options']) if r['options'] else []
+                out.append({'question': r['question'], 'options': opts, 'answer': r['answer']})
+            return out
+    except Exception:
+        app.logger.exception('Failed to fetch questions from DB')
+        return []
+
+
+def get_latest_mtime():
+    try:
+        with closing(get_conn()) as conn:
+            cur = conn.cursor()
+            cur.execute('SELECT MAX(updated_at) as m FROM questions')
+            row = cur.fetchone()
+            return int(row['m']) if row and row['m'] else 0
+    except Exception:
+        app.logger.exception('Failed to read latest mtime from DB')
+        return 0
+
+
+def replace_questions(parsed):
+    """Replace all questions in a single transaction and return new mtime."""
+    ts = int(time.time())
+    try:
+        with closing(get_conn()) as conn:
+            cur = conn.cursor()
+            cur.execute('DELETE FROM questions')
+            for i, q in enumerate(parsed):
+                cur.execute('INSERT INTO questions (ord, question, options, answer, updated_at) VALUES (?,?,?,?,?)',
+                            (i, q.get('question',''), json.dumps(q.get('options',[]), ensure_ascii=False), q.get('answer',''), ts))
+            conn.commit()
+        return ts
+    except Exception:
+        app.logger.exception('Failed to replace questions in DB')
+        raise
+
+# initialize DB and set QUESTIONS_MTIME
 try:
-    if os.path.exists(QUESTIONS_FILE):
-        with open(QUESTIONS_FILE, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-            if isinstance(data, list):
-                QUESTIONS_IN_MEMORY = data
-                QUESTIONS_MTIME = int(time.time())
+    init_db()
+    QUESTIONS_MTIME = get_latest_mtime() or int(time.time())
+    app.logger.info(f'DB initialized at {DB_PATH}, questions_mtime={QUESTIONS_MTIME}')
 except Exception:
-    app.logger.exception('Failed to load initial questions from file, proceeding with empty in-memory list')
+    app.logger.exception('DB initialization failed')
+    QUESTIONS_MTIME = int(time.time())
 
 import tempfile
 
@@ -66,13 +149,8 @@ def _ensure_file_exists(path):
 
 
 def load_questions_safe():
-    """Return the in-memory questions list. No file writes are performed."""
-    global QUESTIONS_IN_MEMORY
-    try:
-        return QUESTIONS_IN_MEMORY
-    except Exception:
-        app.logger.exception('Unexpected error returning in-memory questions')
-        return []
+    """Return questions from persistent DB."""
+    return fetch_all_questions()
 
 
 def atomic_write_json(path, data, max_tries=3):
@@ -160,11 +238,40 @@ def questions():
 
 @app.route('/questions_meta')
 def questions_meta():
-    # Return mtime of in-memory questions (timestamp when they were last updated)
+    # Return mtime of persistent questions (timestamp when they were last updated)
     try:
         return jsonify({'mtime': int(QUESTIONS_MTIME)})
     except Exception:
         return jsonify({'mtime': 0})
+
+
+@app.route('/events')
+def events():
+    """SSE endpoint that notifies clients when questions are updated."""
+    # capture request args here so generator does not access `request` while streaming
+    try:
+        since = int(request.args.get('since') or 0)
+    except Exception:
+        since = 0
+
+    def gen(last=since):
+        # send a comment to open connection
+        yield ': connected\n\n'
+        while True:
+            try:
+                current = QUESTIONS_MTIME
+                if current and current != last:
+                    last = current
+                    data = json.dumps({'event': 'questions_updated', 'mtime': current})
+                    yield f'data: {data}\n\n'
+                time.sleep(1)
+            except GeneratorExit:
+                break
+            except Exception:
+                app.logger.exception('SSE generator error')
+                time.sleep(1)
+
+    return app.response_class(gen(), mimetype='text/event-stream', headers={'Cache-Control': 'no-cache'})
 
 
 @app.route('/check', methods=['POST'])
@@ -274,22 +381,35 @@ def admin_update_questions():
     if len(parsed) > 50:
         return jsonify({'error': 'limit 50 questions'}), 400
 
-    # Update in-memory questions (no filesystem writes on purpose)
-    global QUESTIONS_IN_MEMORY, QUESTIONS_MTIME
-    app.logger.info(f'admin_update_questions: parsed {len(parsed)} questions; updating in-memory store')
-    QUESTIONS_IN_MEMORY = parsed
-    QUESTIONS_MTIME = int(time.time())
-    resp = {'ok': True, 'count': len(parsed), 'mtime': QUESTIONS_MTIME}
-    return jsonify(resp)
+    # Persist parsed questions to DB (replace all)
+    try:
+        app.logger.info(f'admin_update_questions: parsed {len(parsed)} questions; replacing DB')
+        new_mtime = replace_questions(parsed)
+        # update in-memory marker
+        global QUESTIONS_MTIME
+        QUESTIONS_MTIME = new_mtime
+        # notify: SSE clients will pick up new mtime
+        resp = {'ok': True, 'count': len(parsed), 'mtime': QUESTIONS_MTIME}
+        return jsonify(resp)
+    except Exception as e:
+        app.logger.exception('Failed persisting questions to DB')
+        return jsonify({'error': 'failed to persist questions', 'detail': str(e)}), 500
 
 
 @app.route('/admin/test_storage', methods=['GET'])
 def admin_test_storage():
-    """Report that the app is using in-memory storage and return basic info."""
+    """Report DB storage and basic info."""
     try:
-        return jsonify({'in_memory': True, 'questions_mtime': QUESTIONS_MTIME, 'count': len(QUESTIONS_IN_MEMORY)})
+        count = 0
+        with closing(get_conn()) as conn:
+            cur = conn.cursor()
+            cur.execute('SELECT COUNT(1) as c FROM questions')
+            row = cur.fetchone()
+            count = int(row['c']) if row and row['c'] else 0
+        return jsonify({'persistent': True, 'engine': 'sqlite', 'questions_mtime': QUESTIONS_MTIME, 'count': count})
     except Exception:
-        return jsonify({'in_memory': True, 'questions_mtime': 0, 'count': 0})
+        app.logger.exception('admin_test_storage failed')
+        return jsonify({'persistent': False, 'questions_mtime': 0, 'count': 0})
 
 
 if __name__ == '__main__':

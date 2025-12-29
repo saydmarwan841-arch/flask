@@ -22,10 +22,10 @@ python app.py
 
 Files
 
-- `app.py`: Flask backend with `/questions` and `/check` endpoints (now uses **in-memory** storage; no file writes).
-- `questions.json`: optional file used only to pre-populate the in-memory store on startup (no writes are performed).
-- `templates/index.html`: frontend UI (no external libraries required).
-- `static/js/app.js`: frontend logic.
+- `app.py`: Flask backend with `/questions` and `/check` endpoints — **now uses SQLite for persistent storage** (data persists across restarts).
+- `data.sqlite3`: SQLite database file used to store questions persistently.
+- `templates/index.html`: frontend UI (no external libraries required). Automatic updates are delivered to clients via Server-Sent Events (SSE).
+- `static/js/app.js`: frontend logic (includes SSE client to refresh questions automatically without requiring users to reload the page).
 - `static/css/styles.css`: custom styles.
 
-Use the hidden admin page (`/admin`) to update questions at runtime (password protected). Note: questions are stored only in memory and will be lost when the server restarts — this is intentional for free-hosting compatibility.
+Use the hidden admin page (`/admin`) to update questions at runtime (password protected). Changes are stored in the database and will be visible to all users instantly via SSE (no manual refresh needed).
