@@ -101,6 +101,53 @@ header h1 {
     }
 }
 
+/* correct / wrong transitions */
+.option.correct {
+    transform: translateY(-6px) scale(1.02);
+    box-shadow: 0 18px 30px rgba(16, 185, 129, 0.08);
+}
+
+.option.wrong {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 18px rgba(239, 68, 68, 0.06);
+}
+
+#question-text {
+    color: #0f172a;
+}
+
+/* prettier progress bar */
+#progress-bar {
+    height: 8px;
+    border-radius: 999px;
+    background: linear-gradient(90deg, #f472b6, #7c3aed);
+    transition: width 400ms ease;
+}
+
+/* subtle final message style */
+#result {
+    position: relative;
+}
+
+/* nicer confetti */
+.confetti {
+    font-size: 26px;
+    opacity: 0.95;
+    animation: floatup 2s ease forwards;
+}
+
+@keyframes floatup {
+    0% {
+        transform: translateY(0) rotate(0);
+        opacity: 1
+    }
+
+    100% {
+        transform: translateY(-80px) rotate(20deg);
+        opacity: 0
+    }
+}
+
 /* small confetti/emojis */
 .confetti {
     position: absolute;

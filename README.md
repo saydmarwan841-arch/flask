@@ -22,10 +22,10 @@ python app.py
 
 Files
 
-- `app.py`: Flask backend with `/questions` and `/check` endpoints.
-- `questions.json`: quiz data (question, options, answer, image).
-- `templates/index.html`: frontend UI using Tailwind CDN.
+- `app.py`: Flask backend with `/questions` and `/check` endpoints (now uses **in-memory** storage; no file writes).
+- `questions.json`: optional file used only to pre-populate the in-memory store on startup (no writes are performed).
+- `templates/index.html`: frontend UI (no external libraries required).
 - `static/js/app.js`: frontend logic.
-- `static/css/styles.css`: small custom styles.
+- `static/css/styles.css`: custom styles.
 
-Edit `questions.json` to add more questions. Images can be external URLs or local files placed under `static`.
+Use the hidden admin page (`/admin`) to update questions at runtime (password protected). Note: questions are stored only in memory and will be lost when the server restarts — this is intentional for free-hosting compatibility.

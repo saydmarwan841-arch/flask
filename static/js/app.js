@@ -81,24 +81,50 @@ async function handleAnswer(selected, btn) {
 }
 
 function randomCongrats() {
-    const msgs = ['أحسنت!', 'رائع!', 'ممتاز!', 'مبروك!'];
+    const msgs = ['أحسنتِ! 👏', 'عمل رائع! 🌟', 'ممتاز — استمري!', 'مبروك! 🎉'];
     return msgs[Math.floor(Math.random() * msgs.length)];
+}
+
+// handle zero questions gracefully
+function renderQuestion() {
+    if (!questions || questions.length === 0) {
+        $('#question-text').textContent = 'لا توجد أسئلة حالياً. انتظري الإضافة من المشرف.';
+        $('#options').innerHTML = '';
+        $('#feedback').innerHTML = '';
+        setProgress();
+        return;
+    }
+    if (index >= questions.length) return showResult();
+    setProgress();
+    const q = questions[index];
+    $('#question-text').textContent = q.question || '';
+    const opts = $('#options');
+    opts.innerHTML = '';
+    q.options.forEach((opt) => {
+        const btn = document.createElement('button');
+        btn.className = 'option bg-gray-100 hover:bg-gray-200 p-3 rounded-lg shadow-sm text-right transition';
+        // label + icon right side
+        btn.innerHTML = `<span class="label">${opt}</span><span class="icon" aria-hidden="true">•</span>`;
+        btn.onclick = () => handleAnswer(opt, btn);
+        opts.appendChild(btn);
+    });
+    $('#feedback').innerHTML = '';
 }
 
 function showResult() {
     $('#card').classList.add('hidden');
     const res = $('#result');
     res.classList.remove('hidden');
-    const msgs = ['عمل رائع! استمري 🎉', 'أداء ممتاز — أحسنتِ!', 'ممتاز! فخورون بكِ!'];
+    const msgs = ['عمل رائع! حافظي على الاجتهاد.', 'رائع! استمري في التعلم.', 'ممتاز! أنتِ تتقدمين يومًا بعد يوم.'];
     $('#final-message').textContent = msgs[Math.floor(Math.random() * msgs.length)];
     $('#final-message').classList.add('final-anim');
-    $('#final-score').textContent = `أحرزت ${score} من أصل ${questions.length}.`;
+    $('#final-score').textContent = `أحرزتِ ${score} من أصل ${questions.length}.`;
     // small confetti (emoji) burst
     const conf = document.createElement('div');
     conf.className = 'confetti';
     conf.style.right = '20px';
     conf.style.top = '10px';
-    conf.style.fontSize = '20px';
+    conf.style.fontSize = '28px';
     conf.textContent = '🎉✨🌟';
     res.appendChild(conf);
     setTimeout(() => conf.remove(), 2400);
@@ -130,16 +156,16 @@ function showUpdateToast(msg) {
 
 function startMetaPolling(interval = 5000) {
     // fetch initial meta
-    fetchMeta().then(m => { if (m) currentMeta = m; });
+    fetchMeta().then(m => { if (m !== null) currentMeta = m; });
     setInterval(async () => {
         const m = await fetchMeta();
-        if (m && currentMeta && m !== currentMeta) {
+        if (m !== null && currentMeta !== null && m !== currentMeta) {
             currentMeta = m;
             // reload questions and reset progress
             index = 0; score = 0;
             await load();
             showUpdateToast('تم تحديث الأسئلة تلقائيًا.');
-        } else if (m) {
+        } else if (m !== null) {
             currentMeta = m;
         }
     }, interval);

@@ -18,7 +18,8 @@
     <div class="max-w-3xl w-full p-6">
         <header class="mb-6 text-center">
             <h1 class="text-2xl font-extrabold text-pink-600">لوحة المشرف</h1>
-            <p class="text-sm text-gray-600">صفحة مخفية لتحديث الأسئلة (محمية بكلمة سر)</p>
+            <p class="text-sm text-gray-600">صفحة مخفية لتحديث الأسئلة (محمية بكلمة سر) — التخزين في الذاكرة فقط وسيختفي
+                عند إعادة تشغيل الخادم</p>
         </header>
 
         <main class="bg-white shadow-xl rounded-xl p-6 text-right">
@@ -58,6 +59,8 @@
     <script>
         const API_VERIFY = '/admin/verify';
         const API_UPDATE = '/admin/update_questions';
+        // server-side known logged-in state
+        const LOGGED_IN = {{ 'true' if logged_in else 'false' }};
 
         const $ = (s) => document.querySelector(s);
 
@@ -72,6 +75,14 @@
                 if (!q.options.includes(q.answer)) throw new Error(`السؤال رقم ${i + 1} الإجابة الصحيحة يجب أن تكون من بين الخيارات`);
             });
             return true;
+        }
+
+        // show editor immediately if server says we're logged in
+        if (LOGGED_IN) {
+            $('#login').classList.add('hidden');
+            $('#editor').classList.remove('hidden');
+            $('#save-msg').textContent = '';
+            $('#questions-json').focus();
         }
 
         document.getElementById('verify').addEventListener('click', async () => {
@@ -178,11 +189,11 @@
                 const res = await fetch('/admin/test_storage');
                 const d = await res.json().catch(() => ({}));
                 if (res.ok) {
-                    if (d.writable) {
-                        $('#storage-test-msg').textContent = `✅ الخادم يسمح بالكتابة. questions_mtime: ${d.questions_mtime}`;
+                    if (d.in_memory) {
+                        $('#storage-test-msg').textContent = `✅ التخزين يعمل بالذاكرة. عدد الأسئلة: ${d.count}`;
                         $('#storage-test-msg').className = 'mt-2 text-sm text-green-600';
                     } else {
-                        $('#storage-test-msg').textContent = '⚠️ الخادم لا يسمح بالكتابة أو حدث خطأ أثناء الاختبار.';
+                        $('#storage-test-msg').textContent = '⚠️ التخزين ليس بالذاكرة.';
                         $('#storage-test-msg').className = 'mt-2 text-sm text-red-600';
                     }
                 } else {

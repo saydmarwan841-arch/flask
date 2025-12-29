@@ -1,13 +1,32 @@
 from flask import Flask, jsonify, request, render_template
 import json
 import os
+import shutil
+import time
 
 app = Flask(__name__, static_folder='static', template_folder='templates')
+# session for admin auth
+app.secret_key = os.environ.get('SECRET_KEY', 'dev-secret-key')
 
+# Persisting to disk is disabled for free-host compatibility; use in-memory storage
 QUESTIONS_FILE = os.path.join(app.root_path, 'questions.json')
 BACKUP_FILE = os.path.join(app.root_path, 'questions_backup.json')
 
-import time
+# In-memory questions (no file writes). Pre-populate from existing file if present.
+QUESTIONS_IN_MEMORY = []
+QUESTIONS_MTIME = int(time.time())
+
+# Try to load initial data from questions.json (best-effort, no writes)
+try:
+    if os.path.exists(QUESTIONS_FILE):
+        with open(QUESTIONS_FILE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            if isinstance(data, list):
+                QUESTIONS_IN_MEMORY = data
+                QUESTIONS_MTIME = int(time.time())
+except Exception:
+    app.logger.exception('Failed to load initial questions from file, proceeding with empty in-memory list')
+
 import tempfile
 
 
@@ -47,51 +66,80 @@ def _ensure_file_exists(path):
 
 
 def load_questions_safe():
-    """Load questions, returning a list. If file is invalid, reset to empty list after backing up."""
+    """Return the in-memory questions list. No file writes are performed."""
+    global QUESTIONS_IN_MEMORY
     try:
-        with open(QUESTIONS_FILE, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-            if not isinstance(data, list):
-                raise ValueError('questions.json must contain a JSON array')
-            return data
-    except Exception as e:
-        app.logger.exception('Error reading questions file; resetting to empty list')
-        # try to preserve original
-        try:
-            ts = int(time.time())
-            shutil.copyfile(QUESTIONS_FILE, f"{QUESTIONS_FILE}.corrupt.{ts}")
-        except Exception:
-            pass
-        with open(QUESTIONS_FILE, 'w', encoding='utf-8') as f:
-            json.dump([], f, ensure_ascii=False, indent=2)
+        return QUESTIONS_IN_MEMORY
+    except Exception:
+        app.logger.exception('Unexpected error returning in-memory questions')
         return []
 
 
-def atomic_write_json(path, data):
-    """Write JSON data atomically to path, ensuring utf-8 and replace in-place."""
+def atomic_write_json(path, data, max_tries=3):
+    """Write JSON data atomically to path with retries.
+
+    On platforms like Windows, replacing a file can fail if another process briefly
+    has the file open. This function will attempt a few retries and will fall back
+    to a direct copy-over approach if os.replace fails.
+    """
     dirn = os.path.dirname(path) or '.'
-    fd, tmp = tempfile.mkstemp(dir=dirn)
-    try:
-        with os.fdopen(fd, 'w', encoding='utf-8') as tmpf:
-            json.dump(data, tmpf, ensure_ascii=False, indent=2)
-            tmpf.flush()
-            os.fsync(tmpf.fileno())
-        os.replace(tmp, path)
+    last_exc = None
+    for attempt in range(1, max_tries + 1):
+        fd, tmp = tempfile.mkstemp(dir=dirn)
         try:
-            os.chmod(path, 0o664)
-        except Exception:
-            pass
-    except Exception:
-        try:
-            os.remove(tmp)
-        except Exception:
-            pass
-        raise
+            with os.fdopen(fd, 'w', encoding='utf-8') as tmpf:
+                json.dump(data, tmpf, ensure_ascii=False, indent=2)
+                tmpf.flush()
+                os.fsync(tmpf.fileno())
+            try:
+                os.replace(tmp, path)
+                try:
+                    os.chmod(path, 0o664)
+                except Exception:
+                    pass
+                return
+            except Exception as e_replace:
+                app.logger.exception(f'os.replace failed (attempt {attempt}) for {path}')
+                last_exc = e_replace
+                # Fallback: try copying the tmp file over the destination
+                try:
+                    with open(tmp, 'rb') as src, open(path, 'wb') as dst:
+                        shutil.copyfileobj(src, dst)
+                        dst.flush()
+                        os.fsync(dst.fileno())
+                    try:
+                        os.chmod(path, 0o664)
+                    except Exception:
+                        pass
+                    try:
+                        os.remove(tmp)
+                    except Exception:
+                        pass
+                    return
+                except Exception as e_copy:
+                    app.logger.exception(f'Fallback copy failed (attempt {attempt}) for {path}')
+                    last_exc = e_copy
+                    try:
+                        os.remove(tmp)
+                    except Exception:
+                        pass
+                    time.sleep(0.1 * attempt)
+                    continue
+        except Exception as e:
+            app.logger.exception(f'atomic_write_json failed while preparing tmp file (attempt {attempt}) for {path}')
+            last_exc = e
+            try:
+                os.remove(tmp)
+            except Exception:
+                pass
+            time.sleep(0.1 * attempt)
+            continue
+    # If we get here, all attempts failed
+    raise Exception(f'atomic_write_json failed after {max_tries} attempts') from last_exc
 
 
-# ensure files exist on startup
-_ensure_file_exists(QUESTIONS_FILE)
-_ensure_file_exists(BACKUP_FILE)
+# Running with in-memory storage — no filesystem setup necessary
+app.logger.info('Starting with in-memory question storage. No file writes will be performed.')
 
 
 @app.route('/')
@@ -112,11 +160,11 @@ def questions():
 
 @app.route('/questions_meta')
 def questions_meta():
+    # Return mtime of in-memory questions (timestamp when they were last updated)
     try:
-        mtime = os.path.getmtime(QUESTIONS_FILE)
+        return jsonify({'mtime': int(QUESTIONS_MTIME)})
     except Exception:
-        mtime = 0
-    return jsonify({'mtime': int(mtime)})
+        return jsonify({'mtime': 0})
 
 
 @app.route('/check', methods=['POST'])
@@ -136,15 +184,17 @@ def check():
 
 
 # --- Admin endpoints: verify password and update questions (with backup) ---
-import shutil
 
 ADMIN_PASSWORD = os.environ.get('ADMIN_PASS', '012868')
+
+from flask import session
 
 @app.route('/admin/verify', methods=['POST'])
 def admin_verify():
     payload = request.get_json(force=True)
     pwd = payload.get('password', '')
     if pwd == ADMIN_PASSWORD:
+        session['admin'] = True
         return jsonify({'ok': True})
     return jsonify({'error': 'invalid password'}), 403
 
@@ -172,7 +222,7 @@ def parse_bulk_questions(content):
 
 @app.route('/admin')
 def admin_page():
-    return render_template('admin.html')
+    return render_template('admin.html', logged_in=bool(session.get('admin', False)))
 
 
 @app.route('/admin/update_questions', methods=['POST'])
@@ -180,7 +230,8 @@ def admin_update_questions():
     payload = request.get_json(force=True)
     pwd = payload.get('password', '')
 
-    if pwd != ADMIN_PASSWORD:
+    # allow either a valid session or a direct password in payload
+    if not session.get('admin') and pwd != ADMIN_PASSWORD:
         return jsonify({'error': 'invalid password'}), 403
 
     # accept either JSON array under 'questions' or raw text under 'questions_raw'
@@ -223,60 +274,22 @@ def admin_update_questions():
     if len(parsed) > 50:
         return jsonify({'error': 'limit 50 questions'}), 400
 
-    # attempt to backup existing file first
-    try:
-        shutil.copyfile(QUESTIONS_FILE, BACKUP_FILE)
-    except Exception:
-        app.logger.exception('Failed to create backup copy of questions.json')
-        # continue but include a warning in the response
-        warn_backup = True
-    else:
-        warn_backup = False
-
-    # atomically write new questions (replace file)
-    try:
-        atomic_write_json(QUESTIONS_FILE, parsed)
-    except Exception as e:
-        app.logger.exception('Failed to write questions file')
-        return jsonify({'error': 'failed to save questions'}), 500
-
-    # include mtime of the questions file in the response so admin can verify persistence
-    try:
-        mtime = int(os.path.getmtime(QUESTIONS_FILE))
-    except Exception:
-        mtime = 0
-    resp = {'ok': True, 'count': len(parsed), 'mtime': mtime}
-    if warn_backup:
-        resp['warning'] = 'backup_failed'
+    # Update in-memory questions (no filesystem writes on purpose)
+    global QUESTIONS_IN_MEMORY, QUESTIONS_MTIME
+    app.logger.info(f'admin_update_questions: parsed {len(parsed)} questions; updating in-memory store')
+    QUESTIONS_IN_MEMORY = parsed
+    QUESTIONS_MTIME = int(time.time())
+    resp = {'ok': True, 'count': len(parsed), 'mtime': QUESTIONS_MTIME}
     return jsonify(resp)
 
 
 @app.route('/admin/test_storage', methods=['GET'])
 def admin_test_storage():
-    """Try writing and reading a temporary file to verify that the host filesystem is writable and persistent."""
-    test_path = os.path.join(app.root_path, 'storage_test.json')
-    payload = {'ok': True, 'ts': int(time.time())}
+    """Report that the app is using in-memory storage and return basic info."""
     try:
-        atomic_write_json(test_path, payload)
-        with open(test_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        # cleanup test file
-        try:
-            os.remove(test_path)
-        except Exception:
-            pass
-        writable = True
+        return jsonify({'in_memory': True, 'questions_mtime': QUESTIONS_MTIME, 'count': len(QUESTIONS_IN_MEMORY)})
     except Exception:
-        app.logger.exception('Storage test failed')
-        data = None
-        writable = False
-
-    try:
-        qmtime = int(os.path.getmtime(QUESTIONS_FILE))
-    except Exception:
-        qmtime = 0
-
-    return jsonify({'writable': writable, 'test_data': data, 'questions_mtime': qmtime})
+        return jsonify({'in_memory': True, 'questions_mtime': 0, 'count': 0})
 
 
 if __name__ == '__main__':
