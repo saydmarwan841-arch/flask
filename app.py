@@ -240,10 +240,43 @@ def admin_update_questions():
         app.logger.exception('Failed to write questions file')
         return jsonify({'error': 'failed to save questions'}), 500
 
-    resp = {'ok': True, 'count': len(parsed)}
+    # include mtime of the questions file in the response so admin can verify persistence
+    try:
+        mtime = int(os.path.getmtime(QUESTIONS_FILE))
+    except Exception:
+        mtime = 0
+    resp = {'ok': True, 'count': len(parsed), 'mtime': mtime}
     if warn_backup:
         resp['warning'] = 'backup_failed'
     return jsonify(resp)
+
+
+@app.route('/admin/test_storage', methods=['GET'])
+def admin_test_storage():
+    """Try writing and reading a temporary file to verify that the host filesystem is writable and persistent."""
+    test_path = os.path.join(app.root_path, 'storage_test.json')
+    payload = {'ok': True, 'ts': int(time.time())}
+    try:
+        atomic_write_json(test_path, payload)
+        with open(test_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        # cleanup test file
+        try:
+            os.remove(test_path)
+        except Exception:
+            pass
+        writable = True
+    except Exception:
+        app.logger.exception('Storage test failed')
+        data = None
+        writable = False
+
+    try:
+        qmtime = int(os.path.getmtime(QUESTIONS_FILE))
+    except Exception:
+        qmtime = 0
+
+    return jsonify({'writable': writable, 'test_data': data, 'questions_mtime': qmtime})
 
 
 if __name__ == '__main__':

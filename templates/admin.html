@@ -143,7 +143,9 @@
                 const res = await fetch(API_UPDATE, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
                 const d = await res.json().catch(() => ({}));
                 if (res.ok) {
-                    $('#save-msg').textContent = `🎉 تم الحفظ — تمت معالجة ${d.count} سؤالًا.`;
+                    let msgText = `🎉 تم الحفظ — تمت معالجة ${d.count} سؤالًا.`;
+                    if (d.mtime) msgText += ` (mtime: ${d.mtime})`;
+                    $('#save-msg').textContent = msgText;
                     $('#save-msg').classList.add('text-green-600');
                     // a little motivational message
                     const msg = document.createElement('div');
@@ -167,6 +169,30 @@
                     }
                 }
             } catch (e) { $('#save-msg').textContent = 'خطأ في الاتصال.'; $('#save-msg').classList.add('text-red-600'); }
+        });
+
+        document.getElementById('test-storage').addEventListener('click', async () => {
+            $('#storage-test-msg').textContent = 'جارٍ الاختبار...';
+            $('#storage-test-msg').className = 'mt-2 text-sm text-gray-700';
+            try {
+                const res = await fetch('/admin/test_storage');
+                const d = await res.json().catch(() => ({}));
+                if (res.ok) {
+                    if (d.writable) {
+                        $('#storage-test-msg').textContent = `✅ الخادم يسمح بالكتابة. questions_mtime: ${d.questions_mtime}`;
+                        $('#storage-test-msg').className = 'mt-2 text-sm text-green-600';
+                    } else {
+                        $('#storage-test-msg').textContent = '⚠️ الخادم لا يسمح بالكتابة أو حدث خطأ أثناء الاختبار.';
+                        $('#storage-test-msg').className = 'mt-2 text-sm text-red-600';
+                    }
+                } else {
+                    $('#storage-test-msg').textContent = d.error || 'خطأ أثناء الاختبار.';
+                    $('#storage-test-msg').className = 'mt-2 text-sm text-red-600';
+                }
+            } catch (e) {
+                $('#storage-test-msg').textContent = 'خطأ في الاتصال.';
+                $('#storage-test-msg').className = 'mt-2 text-sm text-red-600';
+            }
         });
 
         document.getElementById('logout').addEventListener('click', () => {
